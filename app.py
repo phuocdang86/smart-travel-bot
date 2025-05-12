@@ -1,43 +1,45 @@
 from flask import Flask, request, jsonify, render_template
 import os
-from openai import AzureOpenAI
 from dotenv import load_dotenv
+from openai import AzureOpenAI
 
 load_dotenv()
 
-
-# Add this for debugging
-print("🔍 Endpoint:", os.getenv("AZURE_OPENAI_ENDPOINT"))
-print("🔍 API Key starts with:", os.getenv("AZURE_OPENAI_API_KEY")[:5])
-print("🔍 Deployment:", os.getenv("AZURE_OPENAI_DEPLOYMENT"))
-
-
 app = Flask(__name__)
 
-# Setup Azure OpenAI client
+# Setup Azure OpenAI
 client = AzureOpenAI(
     api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-    api_version="2024-02-15-preview",
-    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
+    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+    api_version="2024-02-15-preview"
 )
+deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT")
 
-deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT")  # e.g., "gpt-4"
 
 @app.route('/')
 def home():
     return render_template("chat.html")
 
+
 @app.route('/chat', methods=['POST'])
 def chat():
-    user_input = request.json.get('message')
+    user_input = request.json.get("message")
 
-    response = client.chat.completions.create(
-        model=deployment_name,
-        messages=[{"role": "user", "content": user_input}],
-    )
+    messages = [
+        {"role": "system", "content": "You are a helpful travel assistant. Answer clearly and concisely."},
+        {"role": "user", "content": user_input}
+    ]
 
-    return jsonify({'response': response.choices[0].message.content})
+    try:
+        response = client.chat.completions.create(
+            model=deployment_name,
+            messages=messages
+        )
+        gpt_reply = response.choices[0].message.content.strip()
+        return jsonify({"response": gpt_reply})
+    except Exception as e:
+        return jsonify({"response": f"❌ Error: {str(e)}"})
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     app.run(debug=True)
-

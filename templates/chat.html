@@ -1,36 +1,75 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>GPT Chatbot</title>
+    <title>GPT Travel Chatbot</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 30px;
+            background: #f7f7f7;
+        }
+        #chatbox {
+            height: 400px;
+            background: white;
+            border: 1px solid #ccc;
+            padding: 10px;
+            overflow-y: scroll;
+            margin-bottom: 10px;
+        }
+        .user, .bot {
+            margin: 5px 0;
+        }
+        .user b {
+            color: #007bff;
+        }
+        .bot b {
+            color: #28a745;
+        }
+        input, button {
+            padding: 10px;
+            margin-top: 5px;
+        }
+    </style>
 </head>
 <body>
-    <h2>Chat with Azure OpenAI GPT-4</h2>
+    <h2>✈️ GPT Travel Chatbot</h2>
 
-    <div id="chatbox" style="height: 300px; border: 1px solid #ccc; padding: 10px; overflow-y: scroll;"></div>
+    <div id="chatbox"></div>
 
-    <input type="text" id="userInput" placeholder="Type or speak..." onkeydown="handleKey(event)" />
+    <input type="text" id="userInput" placeholder="Type or speak..." onkeydown="handleKey(event)" size="60"/>
     <button onclick="sendMessage()">Send</button>
-    <button onclick="startVoice()" style="margin-left: 10px;">🎤 Speak</button>
+    <button onclick="startVoice()">🎤 Speak</button>
 
     <script>
+        const chatbox = document.getElementById("chatbox");
+
+        function appendMessage(sender, message) {
+            const div = document.createElement("div");
+            div.className = sender;
+            div.innerHTML = `<b>${sender === 'user' ? 'You' : 'GPT'}:</b> ${message}`;
+            chatbox.appendChild(div);
+            chatbox.scrollTop = chatbox.scrollHeight;
+        }
+
         function sendMessage() {
-            const userInput = document.getElementById("userInput");
-            const userMessage = userInput.value.trim();
+            const input = document.getElementById("userInput");
+            const userMessage = input.value.trim();
             if (!userMessage) return;
 
-            const chatbox = document.getElementById("chatbox");
-            chatbox.innerHTML += "<p><b>You:</b> " + userMessage + "</p>";
+            appendMessage("user", userMessage);
+            input.value = "";
 
             fetch("/chat", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ message: userMessage })
             })
-            .then(response => response.json())
+            .then(res => res.json())
             .then(data => {
-                chatbox.innerHTML += "<p><b>GPT:</b> " + data.response + "</p>";
-                userInput.value = "";
-                chatbox.scrollTop = chatbox.scrollHeight;
+                appendMessage("bot", data.response.replace(/\n/g, "<br>"));
+            })
+            .catch(() => {
+                appendMessage("bot", "⚠️ Something went wrong. Please try again.");
             });
         }
 
@@ -45,13 +84,12 @@
             const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
             recognition.lang = 'en-US';
             recognition.interimResults = false;
-
             recognition.start();
 
             recognition.onresult = function(event) {
                 const transcript = event.results[0][0].transcript;
                 document.getElementById("userInput").value = transcript;
-                sendMessage();  // optionally auto-send
+                sendMessage();
             };
 
             recognition.onerror = function(event) {
