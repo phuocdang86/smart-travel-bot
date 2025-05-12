@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>GPT Chatbot</title>
+</head>
+<body>
+    <h2>Chat with Azure OpenAI GPT-4</h2>
+
+    <div id="chatbox" style="height: 300px; border: 1px solid #ccc; padding: 10px; overflow-y: scroll;"></div>
+
+    <input type="text" id="userInput" placeholder="Type or speak..." onkeydown="handleKey(event)" />
+    <button onclick="sendMessage()">Send</button>
+    <button onclick="startVoice()" style="margin-left: 10px;">🎤 Speak</button>
+
+    <script>
+        function sendMessage() {
+            const userInput = document.getElementById("userInput");
+            const userMessage = userInput.value.trim();
+            if (!userMessage) return;
+
+            const chatbox = document.getElementById("chatbox");
+            chatbox.innerHTML += "<p><b>You:</b> " + userMessage + "</p>";
+
+            fetch("/chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ message: userMessage })
+            })
+            .then(response => response.json())
+            .then(data => {
+                chatbox.innerHTML += "<p><b>GPT:</b> " + data.response + "</p>";
+                userInput.value = "";
+                chatbox.scrollTop = chatbox.scrollHeight;
+            });
+        }
+
+        function handleKey(event) {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                sendMessage();
+            }
+        }
+
+        function startVoice() {
+            const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+            recognition.lang = 'en-US';
+            recognition.interimResults = false;
+
+            recognition.start();
+
+            recognition.onresult = function(event) {
+                const transcript = event.results[0][0].transcript;
+                document.getElementById("userInput").value = transcript;
+                sendMessage();  // optionally auto-send
+            };
+
+            recognition.onerror = function(event) {
+                alert("Voice recognition error: " + event.error);
+            };
+        }
+    </script>
+</body>
+</html>
