@@ -1,101 +1,169 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>GPT Travel Chatbot</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 30px;
-            background: #f7f7f7;
-        }
-        #chatbox {
-            height: 400px;
-            background: white;
-            border: 1px solid #ccc;
-            padding: 10px;
-            overflow-y: scroll;
-            margin-bottom: 10px;
-        }
-        .user, .bot {
-            margin: 5px 0;
-        }
-        .user b {
-            color: #007bff;
-        }
-        .bot b {
-            color: #28a745;
-        }
-        input, button {
-            padding: 10px;
-            margin-top: 5px;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <title>Travel Assistant</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      background: #f7f7f7;
+    }
+
+    .container {
+      max-width: 700px;
+      margin: 40px auto;
+      background: #fff;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    h2 {
+      margin-top: 0;
+    }
+
+    .message-box {
+      min-height: 300px;
+      padding: 10px;
+      border: 1px solid #ccc;
+      background: #fafafa;
+      overflow-y: auto;
+      margin-bottom: 15px;
+      white-space: pre-line;
+    }
+
+    .message {
+      margin-bottom: 10px;
+    }
+
+    .user {
+      font-weight: bold;
+    }
+
+    .bot {
+      color: #2e7d32;
+    }
+
+    .input-group {
+      display: flex;
+      gap: 5px;
+    }
+
+    input[type="text"] {
+      flex: 1;
+      padding: 10px;
+      font-size: 16px;
+      border: 1px solid #aaa;
+      border-radius: 4px;
+    }
+
+    button {
+      padding: 10px 14px;
+      font-size: 16px;
+      cursor: pointer;
+      border-radius: 4px;
+      border: none;
+      background-color: #4caf50;
+      color: white;
+    }
+
+    button:hover {
+      background-color: #45a049;
+    }
+
+    .mic-button {
+      background-color: #1e1e1e;
+      border: 2px solid #555;
+      border-radius: 50%;
+      width: 42px;
+      height: 42px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      transition: background 0.2s ease;
+    }
+
+    .mic-button:hover {
+      background-color: #333;
+    }
+
+    .mic-button i {
+      font-size: 18px;
+    }
+  </style>
 </head>
 <body>
-    <h2>✈️ GPT Travel Chatbot</h2>
+  <div class="container">
+    <h2>Travel Assistant</h2>
+    <div id="chat-box" class="message-box"></div>
 
-    <div id="chatbox"></div>
+    <div class="input-group">
+      <input type="text" id="user-input" placeholder="Type your message..." autofocus>
+      <button id="send">Send</button>
+      <button id="voice" class="mic-button" title="Speak"><i class="fas fa-microphone"></i></button>
+    </div>
+  </div>
 
-    <input type="text" id="userInput" placeholder="Type or speak..." onkeydown="handleKey(event)" size="60"/>
-    <button onclick="sendMessage()">Send</button>
-    <button onclick="startVoice()">🎤 Speak</button>
+  <script>
+    const chatBox = document.getElementById('chat-box');
+    const userInput = document.getElementById('user-input');
+    const sendButton = document.getElementById('send');
+    const voiceButton = document.getElementById('voice');
 
-    <script>
-        const chatbox = document.getElementById("chatbox");
+    function appendMessage(sender, message) {
+      const div = document.createElement('div');
+      div.classList.add('message');
+      div.innerHTML = `<span class="${sender}"><strong>${sender === 'user' ? 'You' : 'Bot'}:</strong> ${message}</span>`;
+      chatBox.appendChild(div);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
 
-        function appendMessage(sender, message) {
-            const div = document.createElement("div");
-            div.className = sender;
-            div.innerHTML = `<b>${sender === 'user' ? 'You' : 'GPT'}:</b> ${message}`;
-            chatbox.appendChild(div);
-            chatbox.scrollTop = chatbox.scrollHeight;
-        }
+    function sendMessage() {
+      const message = userInput.value.trim();
+      if (!message) return;
 
-        function sendMessage() {
-            const input = document.getElementById("userInput");
-            const userMessage = input.value.trim();
-            if (!userMessage) return;
+      appendMessage('user', message);
+      userInput.value = '';
 
-            appendMessage("user", userMessage);
-            input.value = "";
+      fetch('/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message })
+      })
+      .then(res => res.json())
+      .then(data => {
+        appendMessage('bot', data.response);
+      });
+    }
 
-            fetch("/chat", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: userMessage })
-            })
-            .then(res => res.json())
-            .then(data => {
-                appendMessage("bot", data.response.replace(/\n/g, "<br>"));
-            })
-            .catch(() => {
-                appendMessage("bot", "⚠️ Something went wrong. Please try again.");
-            });
-        }
+    sendButton.onclick = sendMessage;
+    userInput.addEventListener('keypress', e => {
+      if (e.key === 'Enter') sendMessage();
+    });
 
-        function handleKey(event) {
-            if (event.key === "Enter") {
-                event.preventDefault();
-                sendMessage();
-            }
-        }
+    // Voice recognition
+    if ('webkitSpeechRecognition' in window) {
+      const recognition = new webkitSpeechRecognition();
+      recognition.lang = 'en-US';
+      recognition.continuous = false;
+      recognition.interimResults = false;
 
-        function startVoice() {
-            const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-            recognition.lang = 'en-US';
-            recognition.interimResults = false;
-            recognition.start();
+      voiceButton.onclick = () => {
+        recognition.start();
+      };
 
-            recognition.onresult = function(event) {
-                const transcript = event.results[0][0].transcript;
-                document.getElementById("userInput").value = transcript;
-                sendMessage();
-            };
-
-            recognition.onerror = function(event) {
-                alert("Voice recognition error: " + event.error);
-            };
-        }
-    </script>
+      recognition.onresult = event => {
+        const transcript = event.results[0][0].transcript;
+        userInput.value = transcript;
+        sendMessage();
+      };
+    } else {
+      voiceButton.disabled = true;
+      voiceButton.title = "Voice recognition not supported";
+    }
+  </script>
 </body>
 </html>
