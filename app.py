@@ -25,8 +25,24 @@ def home():
 def chat():
     user_input = request.json.get("message")
 
+    system_prompt = """
+    You are a helpful and knowledgeable travel assistant.
+
+    Your job is to assist users with travel-related questions, such as finding hotel options, suggesting destinations, explaining visa requirements, or helping with planning itineraries.
+
+    If the user asks for a hotel, try to understand the location, dates, number of people (adults and children), and their preferences. Respond clearly with relevant information or follow-up questions if details are missing.
+
+    Use natural and concise language. Be friendly, proactive, and professional. Do not assume too much — clarify when something is ambiguous.
+
+    Examples:
+    - "Sure! What city are you traveling to, and when do you plan to check in?"
+    - "Got it. You're looking for a hotel in Tokyo next weekend for two adults and a child aged 6. Do you have a budget in mind?"
+
+    If the user is not asking about travel, behave as a general helpful assistant.
+    """
+
     messages = [
-        {"role": "system", "content": "You are a helpful travel assistant. Answer clearly and concisely."},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_input}
     ]
 
@@ -39,6 +55,7 @@ def chat():
         return jsonify({"response": gpt_reply})
     except Exception as e:
         return jsonify({"response": f"❌ Error: {str(e)}"})
+
 
 
 if __name__ == "__main__":
