@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify, render_template, session
 import os
 import requests
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from openai import AzureOpenAI
 import re
@@ -15,86 +15,118 @@ app.secret_key = os.getenv("SECRET_KEY", "travel-secret-key")
 client = AzureOpenAI(
     api_key=os.getenv("AZURE_OPENAI_API_KEY"),
     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-    api_version="2024-02-15-preview"
+    api_version="2024-12-01-preview"
 )
 deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT")
 
-# Travel Advisor API Setup
 RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
 RAPIDAPI_HOST = os.getenv("RAPIDAPI_HOST")
-TRAVEL_SEARCH_URL = "https://travel-advisor.p.rapidapi.com/locations/search"
-HOTEL_LIST_URL = "https://travel-advisor.p.rapidapi.com/hotels/list"
+
+BOOKING_LOCATION_URL = "https://booking-com15.p.rapidapi.com/api/v1/hotels/searchDestination"
+BOOKING_HOTEL_LIST_URL = "https://booking-com15.p.rapidapi.com/api/v1/hotels/searchHotels"
+BOOKING_HOTEL_PHOTOS_URL = "https://booking-com15.p.rapidapi.com/api/v1/hotels/getHotelPhotos"
 
 headers = {
     "X-RapidAPI-Key": RAPIDAPI_KEY,
-    "X-RapidAPI-Host": RAPIDAPI_HOST
+    "X-RapidAPI-Host": RAPIDAPI_HOST,
+    "Accept": "application/json"
 }
 
-def parse_dates(text):
-    match = re.search(r"(\d{1,2})[-–](\d{1,2})/(\d{2,4})", text)
-    if match:
-        start_day, end_day, month = match.groups()
-        year = datetime.now().year
-        start_date = f"{year}-{int(month):02d}-{int(start_day):02d}"
-        end_date = f"{year}-{int(month):02d}-{int(end_day):02d}"
-        return start_date, end_date
-    return None, None
-
 def extract_travel_info(user_input):
-    extraction_prompt = f"""
-Extract and return the following from the user's travel request in JSON:
+    prompt = f"""
+Today’s date is {datetime.today().strftime('%Y-%m-%d')}.
+
+You are a smart travel assistant. From the user’s message, extract and return the following in JSON:
 - City
-- Check-in date (format YYYY-MM-DD)
-- Check-out date (format YYYY-MM-DD)
-- Number of adults
-- Number of children
-- Preferences (e.g. CBD, budget, sorting)
-Return "unknown" if any field is missing. If the number of customers unknown, set 1 adult as default.
+- Check-in date (YYYY-MM-DD, must be today or a future date)
+- Check-out date (YYYY-MM-DD, must be after check-in date)
+- Number of nights
+- Number of adults (default to 1 if unknown)
+- Number of children (default to 0 if unknown)
+- Preferences (e.g. CBD, budget, view)
+
+Be flexible and handle follow-up messages like changes in group size, stay duration and other enquiries. Always maintain previous information if not updated.
+Ensure the dates are not in the past.
 
 Input: {user_input}
 """
-    messages = [{"role": "system", "content": "You extract structured travel info."},
-                {"role": "user", "content": extraction_prompt}]
-    response = client.chat.completions.create(
-        model=deployment_name,
-        messages=messages
-    )
-    return json.loads(response.choices[0].message.content.strip())
-
-def extract_option_number(text):
-    match = re.search(r'option\s*(\d+)', text.lower())
-    return int(match.group(1)) if match else None
+    messages = [
+        {"role": "system", "content": "Extract structured travel info from user input."},
+        {"role": "user", "content": prompt}
+    ]
+    response = client.chat.completions.create(model=deployment_name, messages=messages)
+    extracted = response.choices[0].message.content.strip()
+    return json.loads(extracted)
 
 def get_city_location_id(city):
-    params = {"query": city, "limit": "1"}
-    res = requests.get(TRAVEL_SEARCH_URL, headers=headers, params=params)
+    params = {"query": city}
     try:
-        return res.json()["data"][0]["result_object"]["location_id"]
-    except:
+        res = requests.get(BOOKING_LOCATION_URL, headers=headers, params=params)
+        res.raise_for_status()
+        data = res.json().get("data", [])
+        for loc in data:
+            name = loc.get("name", "").lower()
+            if city.lower() in name:
+                return loc.get("dest_id")
+        return None
+    except Exception as e:
+        print("[ERROR] Could not extract dest_id:", e)
         return None
 
-def get_hotels(location_id, checkin, adults="2"):
-    params = {
-        "location_id": location_id,
-        "checkin": checkin,
-        "adults": adults,
-        "nights": "1",
-        "currency": "USD",
-        "sort": "price"
-    }
-    res = requests.get(HOTEL_LIST_URL, headers=headers, params=params)
-    hotels = res.json().get("data", [])
-    result = []
-    for h in hotels[:5]:
-        if h.get("name") and h.get("price"):
-            result.append({
-                "name": h["name"],
-                "location": h["location_string"],
-                "price": h["price"],
-                "rating": h.get("rating", "N/A"),
-                "summary": f"{h['name']} – {h['location_string']}, {h['price']} (Rating: {h.get('rating', 'N/A')})"
-            })
-    return result
+def get_hotels(location_id, checkin, checkout, adults="1", children="0"):
+    try:
+        nights = (datetime.strptime(checkout, "%Y-%m-%d") - datetime.strptime(checkin, "%Y-%m-%d")).days
+        if nights <= 0:
+            nights = 1
+            checkout = (datetime.strptime(checkin, "%Y-%m-%d") + timedelta(days=nights)).strftime("%Y-%m-%d")
+
+        params = {
+            "dest_id": location_id,
+            "search_type": "CITY",
+            "arrival_date": checkin,
+            "departure_date": checkout,
+            "adults": adults,
+            "children_qty": children,
+            "room_qty": "1",
+            "page_number": "1",
+            "units": "metric",
+            "temperature_unit": "c",
+            "languagecode": "en-us",
+            "currency_code": "USD"
+        }
+
+        res = requests.get(BOOKING_HOTEL_LIST_URL, headers=headers, params=params)
+
+        hotels = res.json().get("data", {}).get("hotels", [])
+        result = []
+        for h in hotels[:5]:
+            prop = h.get("property", {})
+            if h.get("hotel_id"):
+                photo_urls = prop.get("photoUrls") or []
+                photo_url = photo_urls[0] if photo_urls else None
+                result.append({
+                    "name": prop.get("name"),
+                    "location": prop.get("wishlistName", "Unknown location"),
+                    "price": prop.get("priceBreakdown", {}).get("grossPrice", {}).get("value", "N/A"),
+                    "rating": prop.get("reviewScore", "N/A"),
+                    "photo": photo_url,
+                    "summary": f"{prop.get('name')} – {prop.get('wishlistName', '')}, ${prop.get('priceBreakdown', {}).get('grossPrice', {}).get('value', 'N/A')} (Rating: {prop.get('reviewScore', 'N/A')})"
+                })
+        return result
+    except Exception as e:
+        print("[ERROR] Failed to parse hotel response:", e)
+        return []
+
+def get_hotel_photo(hotel_id):
+    try:
+        params = {"hotel_id": hotel_id}
+        res = requests.get(BOOKING_HOTEL_PHOTOS_URL, headers=headers, params=params)
+        data = res.json()
+        if data:
+            return data[0].get("url")
+    except:
+        pass
+    return None
 
 @app.route('/')
 def home():
@@ -103,132 +135,83 @@ def home():
 @app.route('/chat', methods=['POST'])
 def chat():
     user_input = request.json.get("message")
-
     if "messages" not in session:
-        session["messages"] = [
-            {"role": "system", "content": "You're a natural, helpful travel assistant. Never repeat questions. Use memory to avoid re-asking what's already known. Respond conversationally and ask only what's missing."}
-        ]
+        session["messages"] = []
     if "extracted" not in session:
         session["extracted"] = {}
 
-    history = session.get("messages", [])
-    history.append({"role": "user", "content": user_input})
-
-    checkin_parsed, _ = parse_dates(user_input)
+    session["messages"].append({"role": "user", "content": user_input})
 
     intent_prompt = f"""
-Determine if the following user message is intended to inquire about hotel booking or planning a trip.
-Respond only with 'yes' or 'no'.
+Classify the user's intent as either hotel or general.
 Message: {user_input}
+Respond with: hotel or general
 """
     intent_response = client.chat.completions.create(
         model=deployment_name,
-        messages=[
-            {"role": "system", "content": "You determine intent to book a hotel."},
-            {"role": "user", "content": intent_prompt}
-        ]
-    ).choices[0].message.content.strip()
+        messages=[{"role": "system", "content": "Intent classifier."}, {"role": "user", "content": intent_prompt}]
+    ).choices[0].message.content.strip().lower()
 
-    print("🤖 GPT intent detection response:", intent_response)
-    intent_check = intent_response.strip().lower()
-    intent_check = "yes" if intent_check == "yes" else "no"
+    intent = intent_response if intent_response in ["hotel", "general"] else "general"
 
-    if intent_check != "yes":
-        session["extracted"] = {}
-        session["messages"] = session["messages"][:1]
-
-    extracted = {}
-    if intent_check == "yes":
+    if intent == "hotel":
         extracted = extract_travel_info(user_input)
+        default_notices = []
 
-    for k, v in extracted.items():
-        if isinstance(v, str):
-            if v.lower() != "unknown":
-                session["extracted"][k] = v
-        else:
-            session["extracted"][k] = v
+        for k in ["City", "Check-in date", "Check-out date", "Number of nights", "Number of adults", "Number of children", "Preferences"]:
+            new_val = extracted.get(k)
+            if new_val not in [None, "unknown", "null", "", []]:
+                session["extracted"][k] = new_val
 
-    if checkin_parsed:
-        parsed_year = int(checkin_parsed.split("-")[0])
-        current_year = datetime.now().year
-        if ("Check-in date" not in session["extracted"]) or (int(session["extracted"].get("Check-in date", "0000-00-00").split("-")[0]) < current_year):
-            session["extracted"]["Check-in date"] = checkin_parsed
+        info = session["extracted"]
 
-    info = session.get("extracted", {})
-    print("🔍 Extracted info from session:", info)
-    print("📅 Parsed check-in (from parse_dates):", checkin_parsed)
-    filled = all(key in info for key in ["City", "Check-in date"])
+        if not info.get("Number of adults"):
+            info["Number of adults"] = "1"
+            default_notices.append("Defaulting to 1 adult.")
 
-    def summarize_info(info):
-        parts = []
-        if "City" in info:
-            parts.append(f"destination: {info['City']}")
-        if "Check-in date" in info:
-            parts.append(f"check-in on {info['Check-in date']}")
-        if "Number of adults" in info:
-            parts.append(f"{info['Number of adults']} adult(s)")
-        if "Preferences" in info:
-            parts.append(f"preferences: {info['Preferences']}")
-        return ", ".join(parts)
+        if not info.get("Number of children"):
+            info["Number of children"] = "0"
+            default_notices.append("Defaulting to 0 children.")
 
-    option_requested = extract_option_number(user_input)
-    if option_requested and "hotels" in session:
-        index = option_requested - 1
-        if 0 <= index < len(session["hotels"]):
-            selected = session["hotels"][index]
-            gpt_reply = f"Here are more details about **{selected['name']}**:\n\n" \
-                         f"**Location:** {selected['location']}\n" \
-                         f"**Price:** {selected['price']}\n" \
-                         f"**Rating:** {selected['rating']}\n" \
-                         f"This hotel is known for being affordable and well-located in the city center."
-            session["messages"] = history + [{"role": "assistant", "content": gpt_reply}]
-            return jsonify({"response": gpt_reply.replace('\n', '<br>')})
-
-    if filled and intent_check == "yes":
-        city, checkin = info["City"], info["Check-in date"]
+        city = info.get("City")
+        checkin = info.get("Check-in date")
+        checkout = info.get("Check-out date")
         adults = str(info.get("Number of adults", "1"))
-        location_id = get_city_location_id(city)
-        if location_id:
-            hotels = get_hotels(location_id, checkin, adults)
-            session["hotels"] = hotels
-            if hotels:
-                hotel_msg = "<ul>" + "".join(f"<li><strong>Option {i+1}:</strong> {h['summary']}</li>" for i, h in enumerate(hotels)) + "</ul>"
+        children = str(info.get("Number of children", "0"))
+
+        if city and checkin and checkout:
+            location_id = get_city_location_id(city)
+            if location_id:
+                hotels = get_hotels(location_id, checkin, checkout, adults, children)
+                session["hotels"] = hotels
+                if hotels:
+                    hotel_msg = "<ul>" + "".join(f"<li><strong>Option {i+1}:</strong> {h['summary']}</li>" for i, h in enumerate(hotels)) + "</ul>"
+                    notice_text = " ".join(default_notices)
+                    if notice_text:
+                        notice_text += " Let me know if you'd like to adjust the number of adults or children."
+                    reply = f"{notice_text}<br>Here are some hotel options in {city} from {checkin} to {checkout}:<br>{hotel_msg}"
+                else:
+                    reply = f"I couldn't find any hotels in {city} for those dates. Would you like to try different dates or another city?"
             else:
-                hotel_msg = "I couldn’t find any hotels — maybe try different dates."
-            assistant_prompt = f"""
-You are a helpful and friendly travel assistant.
-Here’s what the user has told you so far:
-
-- City: {city}
-- Check-in date: {checkin}
-- Guests: {adults} adult(s)
-- Preferences: {info.get('Preferences', 'not specified')}
-
-Please respond in a natural, conversational way. If everything is known, suggest a few hotels using bullet points. Be warm and engaging — not robotic.
-
-Here are the hotel results:
-{hotel_msg}
-"""
+                reply = f"Sorry, I couldn't find the location '{city}'. Please try rephrasing."
         else:
-            assistant_prompt = f"The city '{city}' could not be found. Ask the user to recheck the spelling."
+            reply = "Could you please let me know the city and check-in/check-out dates for your hotel search?"
     else:
-        assistant_prompt = "You are a warm, friendly travel assistant. The user just said hello or sent a casual greeting. Reply naturally and helpfully — say something like: 'Hi there! I’m your travel assistant. I can help with planning trips, finding hotels, or answering travel questions. Just let me know what you need!' Avoid asking for destination or travel dates unless the user brings them up."
+        reply = client.chat.completions.create(
+            model=deployment_name,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant who can answer general questions naturally."},
+                {"role": "user", "content": user_input}
+            ]
+        ).choices[0].message.content.strip()
 
-    messages = [{"role": "system", "content": assistant_prompt}] + session["messages"]
-    gpt_reply = client.chat.completions.create(
-        model=deployment_name,
-        messages=messages
-    ).choices[0].message.content.strip()
-
-    session["messages"] = session["messages"] + [{"role": "assistant", "content": gpt_reply}]
-    return jsonify({"response": gpt_reply.replace('\n', '<br>')})
+    session["messages"].append({"role": "assistant", "content": reply})
+    return jsonify({"response": reply.replace('\n', '<br>')})
 
 @app.route('/reset', methods=['POST'])
 def reset():
-    session.pop("messages", None)
-    session.pop("extracted", None)
-    session.pop("hotels", None)
+    session.clear()
     return jsonify({"response": "Reset complete."})
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     app.run(debug=True)

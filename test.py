@@ -1,20 +1,25 @@
-import os
-from dotenv import load_dotenv
-from openai import AzureOpenAI
+import requests
 
-load_dotenv()
+headers = {
+    "X-RapidAPI-Key": "755bd08de8msh447acc8dbc9f228p1c3a81jsne431d641d721",
+    "X-RapidAPI-Host": "booking-com15.p.rapidapi.com",
+    "Accept": "application/json"
+}
 
-client = AzureOpenAI(
-    api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-    api_version="2024-02-15-preview"
-)
+params = {
+    "checkin_date": "2024-06-03",
+    "checkout_date": "2024-06-05",
+    "adults_number": "1",
+    "search_id": "-126693",  # Rome
+    "dest_type": "city",
+    "order_by": "price",
+    "locale": "en-gb",
+    "room_number": "1",
+    "units": "metric",
+    "filter_by_currency": "USD"
+}
 
-deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT")
+response = requests.get("https://booking-com15.p.rapidapi.com/api/v1/hotels/searchHotels", headers=headers, params=params)
 
-response = client.chat.completions.create(
-    model=deployment_name,
-    messages=[{"role": "user", "content": "Say hello"}]
-)
-
-print(response.choices[0].message.content)
+print(response.status_code)
+print(response.text)
